@@ -4,6 +4,11 @@
   hosts: all
   become: yes
 
+  vars:
+    docker_image: "tawa123/infrastructure-platform"
+    docker_tag: "latest"
+    container_name: "infra-platform"
+
   tasks:
     - name: Update apt cache
       apt:
@@ -118,138 +123,96 @@
         name: ssh
         state: restarted
 
-    - name: Verify Nginx is responding
+    - name: Install Docker dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Python SDK
+      pip:
+        name: docker
+        state: present
+
+    - name: Start and enable Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Pull Docker image
+      docker_image:
+        name: "{{ docker_image }}:{{ docker_tag }}"
+        source: pull
+
+    - name: Stop old container if running
+      docker_container:
+        name: "{{ container_name }}"
+        state: absent
+      ignore_errors: yes
+
+    - name: Run Flask container
+      docker_container:
+        name: "{{ container_name }}"
+        image: "{{ docker_image }}:{{ docker_tag }}"
+        state: started
+        ports:
+          - "5000:5000"
+        restart_policy: always
+
+    - name: Configure Nginx reverse proxy
+      copy:
+        dest: /etc/nginx/sites-available/infra-platform
+        content: |
+          server {
+              listen 80;
+
+              location / {
+                  proxy_pass http://localhost:5000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
+
+    - name: Enable Nginx site
+      file:
+        src: /etc/nginx/sites-available/infra-platform
+        dest: /etc/nginx/sites-enabled/infra-platform
+        state: link
+
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: Verify app is responding
       uri:
         url: http://localhost
         status_code: 200
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---
-# - name: Configure Web Server
-#   hosts: all
-#   become: yes
-
-#   vars:
-#     docker_image: "tawa123/infrastructure-platform"
-#     docker_tag: "latest"
-#     container_name: "infrastructure-platform"
-
-#   tasks:
-#     - name: Update apt cache
-#       apt:
-#         update_cache: yes
-
-#     - name: Install Ngnix
-#       apt:
-#         name: nginx
-#         state: present
-
-#     - name: Start and enable Ngnix
-#       service: 
-#         name: ngnix
-#         state: started
-#         enabled: yes    
-
-#     - name: Create webteam group
-#       group:
-#         name: webteam
-#         state: present
-
-#     - name: Create webadmin user
-#       user:
-#         name: webadmin
-#         state: present    
-
-#     - name: Create developer user
-#       user: 
-#         name: developer
-#         state: present       
-
-#     - name: Create readonly user
-#       user:
-#         name: readonly
-#         state: present    
-
-#     - name: Create /var/www/html directory
-#       file: 
-#          path: /var/www/html
-#          state: directory
-#          owner: webadmin
-#          group: webteam
-#          mode: '0755'  
-
-#     - name: Deploy custom index.html
-#       copy:
-#         dest: /var/www/html
-#         content: 
-#            <html>
-#           <head><title>DevOps Project</title></head>
-#           <body>
-#           <h1> Infrastructure Platform </h1>
-#           <p>Date: {{ ansible_date_time.date }}</p>
-#           <p>Tools: Terraform, Ansible, Docker</p>
-#           </body>
-#           </html>
-
-#     - name: Set ownership of index.html
-#       file:
-#         path: /var/www/html
-#         owner: webadmin
-#         group: webteam
-
-#     - name: Create /opt/scripts directory
-#       file: 
-#          path: /opt/scripts
-#          state: directory
-#          mode: '0755'
-
-#     - name: Deploy health check script
-#       copy:
-#         dest: /opt/scripts/health_check.sh
-#         mode: '0755'
-#         content: |
-#           #!/bin/bash
-#           curl -f http://localhost || echo "Service down"    
-
-#     - name: Schedule health check every 5 minutes
-#       cron:
-#         name: "Health check"
-#         minutes: "*/5"             
-#         job: "/opt/script/health_check.sh"        
-                
-
-#     - name: Disable root login
-#       lineinfile:
-#         path: /etc/ssh/sshd_config
-#         regexp: '^PermitRootLogin'
-#         line: 'PermitRootLogin no' 
-
-#     - name: Disable password authentication
-#       lineinfile:
-#          path: /etc/ssh/sshd_config
-#          regexp: '^PasswordAuthentication' 
-#          line: "PasswordAuthentication no"   
-
-#     - name: Restart SSh service
-#       service: 
-#         name: SSh
-#         state: restarted
-
-#     - name: Verify Nginx is responding
-#       uri:
-#         url: http://localhost
-#         status_code: 200  
-                   
+ 
